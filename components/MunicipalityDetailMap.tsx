@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { ForetakData, getKommuneData } from '@/lib/supabase';
+import 'leaflet/dist/leaflet.css';
 
 interface MunicipalityDetailMapProps {
   kommuneName: string;
@@ -92,7 +93,6 @@ export default function MunicipalityDetailMap({
       try {
         // Dynamically import Leaflet
         const L = await import('leaflet');
-        await import('leaflet/dist/leaflet.css');
 
         // Create map
         const map = L.map(mapRef.current!).setView([59.9139, 10.7522], 10); // Default to Oslo
