@@ -25,6 +25,10 @@ export default function Home() {
   const [detailKommuneNr, setDetailKommuneNr] = useState('')
   const [foretakData, setForetakData] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [kommunerGeoData, setKommunerGeoData] = useState<any>(null)
+  const [searchResults, setSearchResults] = useState<any[]>([])
+  const [showDropdown, setShowDropdown] = useState(false)
+  const [selectedIndex, setSelectedIndex] = useState(-1)
   const hasLoadedData = useRef(false)
 
   // Function to format currency values in Norwegian format
@@ -125,6 +129,16 @@ export default function Home() {
   }
 
   // Load data once when component mounts
+  // Load kommuner geo data for search
+  useEffect(() => {
+    if (mapType === 'kommune' && !kommunerGeoData) {
+      fetch('/kommuner_cleaned.json')
+        .then(res => res.json())
+        .then(data => setKommunerGeoData(data))
+        .catch(err => console.error('Error loading kommuner geo data:', err))
+    }
+  }, [mapType, kommunerGeoData])
+
   useEffect(() => {
     if (hasLoadedData.current) return // Prevent duplicate requests
     
@@ -165,12 +179,7 @@ export default function Home() {
         // Default to "alle næringer" (empty string) instead of first næring
         // setSelectedNaring('') is already the default state
         
-        // Set initial entity selection
-        if (mapType === 'fylke' && fylkeData.length > 0 && !selectedEntity) {
-          setSelectedEntity(fylkeData[0].fylkes_navn)
-        } else if (mapType === 'kommune' && kommuneData.length > 0 && !selectedEntity) {
-          setSelectedEntity(kommuneData[0].kommune)
-        }
+        // Don't set initial entity selection - show national totals by default
       } catch (error) {
         console.error('Error loading data:', error)
         hasLoadedData.current = false // Reset on error
@@ -189,10 +198,13 @@ export default function Home() {
       const newData = mapType === 'fylke' ? fylkeData : kommuneData
       setData(newData)
       
-      // Reset selected entity when switching map type
-      if (newData.length > 0) {
-        setSelectedEntity(mapType === 'fylke' ? newData[0].fylkes_navn : newData[0].kommune)
-      }
+      // Reset selected entity when switching map type - show national totals by default
+      setSelectedEntity('')
+      setSelectedFeature(null)
+      setPopulation(null)
+      setSearchResults([])
+      setShowDropdown(false)
+      setSelectedIndex(-1)
     }
   }, [mapType, kommuneData, fylkeData])
 
@@ -279,22 +291,133 @@ export default function Home() {
                        }}
                      />
                      
-                     {/* Top Left Fact Box */}
-                     {selectedFeature && (
-                       <div className="absolute top-6 left-6 bg-white rounded-xl shadow-xl border border-gray-200 p-6 max-w-sm z-10">
-                         <h3 className="text-lg font-bold text-gray-900 mb-4">
-                           {selectedFeature.properties?.name || selectedFeature.properties?.fylkesnavn}
-                         </h3>
-                         {population !== null && (
-                           <div className="space-y-2 mb-4">
-                             <div className="text-sm text-gray-600">Befolkning</div>
-                             <div className="text-2xl font-bold text-gray-900">
-                               {population.toLocaleString()}
+                     {/* Top Left Box - Search or Selected Feature */}
+                     {(mapType === 'kommune' && !selectedFeature) || selectedFeature ? (
+                       <div className="absolute top-6 left-6 bg-white rounded-xl shadow-xl border border-gray-200 p-4 max-w-sm z-10">
+                         {mapType === 'kommune' && !selectedFeature ? (
+                         // Search Bar for Kommuner with Dropdown
+                         <div className="relative">
+                           <div className="mb-2">
+                             <label className="text-sm font-medium text-gray-700">Søk kommune</label>
+                           </div>
+                           <input
+                             type="text"
+                             placeholder="Skriv kommune navn..."
+                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                             onChange={(e) => {
+                               const searchTerm = e.target.value.toLowerCase()
+                               if (searchTerm.length > 1 && kommunerGeoData) {
+                                 // Find all matching kommuner
+                                 const matches = kommunerGeoData.features?.filter((feature: any) => 
+                                   feature.properties?.name?.toLowerCase().includes(searchTerm)
+                                 ).slice(0, 10) // Limit to 10 results
+                                 
+                                 setSearchResults(matches || [])
+                                 setShowDropdown(true)
+                                 setSelectedIndex(-1) // Reset selection when typing
+                               } else {
+                                 setSearchResults([])
+                                 setShowDropdown(false)
+                                 setSelectedIndex(-1)
+                               }
+                             }}
+                             onKeyDown={(e) => {
+                               if (!showDropdown || searchResults.length === 0) return
+                               
+                               if (e.key === 'ArrowDown') {
+                                 e.preventDefault()
+                                 setSelectedIndex(prev => 
+                                   prev < searchResults.length - 1 ? prev + 1 : 0
+                                 )
+                               } else if (e.key === 'ArrowUp') {
+                                 e.preventDefault()
+                                 setSelectedIndex(prev => 
+                                   prev > 0 ? prev - 1 : searchResults.length - 1
+                                 )
+                               } else if (e.key === 'Enter') {
+                                 e.preventDefault()
+                                 if (selectedIndex >= 0 && selectedIndex < searchResults.length) {
+                                   const feature = searchResults[selectedIndex]
+                                   const name = feature.properties?.name
+                                   if (name) {
+                                     setSelectedEntity(name)
+                                     setSelectedNaring('')
+                                     setSelectedFeature(feature)
+                                     setShowDropdown(false)
+                                     setSelectedIndex(-1)
+                                     // Load population data
+                                     getKommunePopulationByNr(feature.properties?.municipality_code || '')
+                                       .then(pop => setPopulation(pop))
+                                       .catch(err => console.error('Error loading population:', err))
+                                   }
+                                 }
+                               } else if (e.key === 'Escape') {
+                                 setShowDropdown(false)
+                                 setSelectedIndex(-1)
+                               }
+                             }}
+                             onFocus={() => {
+                               if (searchResults.length > 0) {
+                                 setShowDropdown(true)
+                               }
+                             }}
+                             onBlur={() => {
+                               // Delay hiding to allow clicking on dropdown items
+                               setTimeout(() => setShowDropdown(false), 200)
+                             }}
+                           />
+                           
+                           {/* Dropdown with search results */}
+                           {showDropdown && searchResults.length > 0 && (
+                             <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-300 rounded-lg shadow-lg z-20 max-h-60 overflow-y-auto">
+                               {searchResults.map((feature, index) => (
+                                 <div
+                                   key={index}
+                                   className={`px-3 py-2 cursor-pointer border-b border-gray-100 last:border-b-0 ${
+                                     index === selectedIndex 
+                                       ? 'bg-blue-100 text-blue-900' 
+                                       : 'hover:bg-gray-100'
+                                   }`}
+                                   onClick={() => {
+                                     const name = feature.properties?.name
+                                     if (name) {
+                                       setSelectedEntity(name)
+                                       setSelectedNaring('')
+                                       setSelectedFeature(feature)
+                                       setShowDropdown(false)
+                                       setSelectedIndex(-1)
+                                       // Load population data
+                                       getKommunePopulationByNr(feature.properties?.municipality_code || '')
+                                         .then(pop => setPopulation(pop))
+                                         .catch(err => console.error('Error loading population:', err))
+                                     }
+                                   }}
+                                 >
+                                   <div className="font-medium text-gray-900">{feature.properties?.name}</div>
+                                   <div className="text-sm text-gray-500">Kommune</div>
+                                 </div>
+                               ))}
+                             </div>
+                           )}
+                         </div>
+                       ) : selectedFeature ? (
+                         // Selected Feature Info
+                         <div>
+                           <h3 className="text-lg font-bold text-gray-900 mb-4">
+                             {selectedFeature.properties?.name || selectedFeature.properties?.fylkesnavn}
+                           </h3>
+                           {population !== null && (
+                             <div className="space-y-2 mb-4">
+                               <div className="text-sm text-gray-600">Befolkning</div>
+                               <div className="text-2xl font-bold text-gray-900">
+                                 {population.toLocaleString()}
                              </div>
                              </div>
                            )}
+                         </div>
+                       ) : null}
                        </div>
-                     )}
+                     ) : null}
                      
                      {/* Detail Link - Positioned next to selected shape */}
                      {selectedFeature && mapType === 'kommune' && selectedFeature.properties?.municipality_code && (
@@ -480,6 +603,11 @@ export default function Home() {
                           </div>
                         </div>
                       )
+                    }
+                    
+                    // If we're showing national totals, return early
+                    if (!selectedEntity) {
+                      return null // This should never be reached due to the return above
                     }
                     
                     let matchingRow = null
