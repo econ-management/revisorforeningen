@@ -131,7 +131,7 @@ export default function MunicipalityDetailMap({
           // If we have valid bounds, fit the map to them
           if (bounds.latMin !== Infinity && bounds.latMax !== -Infinity) {
             const boundsArray = [[bounds.latMin, bounds.lngMin], [bounds.latMax, bounds.lngMax]];
-            map.fitBounds(boundsArray, { padding: [20, 20] });
+            map.fitBounds(boundsArray as [[number, number], [number, number]], { padding: [20, 20] });
           }
         } else {
           // Default to Oslo if no valid coordinates
